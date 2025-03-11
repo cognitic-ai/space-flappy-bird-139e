@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { useMobile } from '@/hooks/use-mobile'; // We'll create this hook
+import { Button } from '@/components/ui/button';
+import { useMobile } from '@/hooks/use-mobile';
 
 export default function SpaceFlappyBird() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -10,6 +11,14 @@ export default function SpaceFlappyBird() {
   const [gameOver, setGameOver] = useState(false);
   const isMobile = useMobile();
 
+  // Use refs for game state to avoid closure issues
+  const gameStateRef = useRef({
+    birdY: 0,
+    birdVelocity: 0,
+    obstacles: [] as {x: number, height: number, passed: boolean}[],
+    animationFrameId: 0,
+    score: 0
+  });
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -18,14 +27,14 @@ export default function SpaceFlappyBird() {
 
     // Game constants
     const birdSize = 30;
+    const birdX = 100;
     const obstacleWidth = 50;
     const gapHeight = 150;
-    let birdY = canvas.height / 2;
-    let birdVelocity = 0;
     const gravity = 0.5;
     const jumpStrength = -8;
-    const obstacles: {x: number, height: number, passed: boolean}[] = [];
-    let animationFrameId: number;
+
+    // Initialize bird position
+    gameStateRef.current.birdY = canvas.height / 2;
     // Create stars for background
     const stars: {x: number, y: number, size: number}[] = [];
     for (let i = 0; i < 100; i++) {
@@ -50,22 +59,25 @@ export default function SpaceFlappyBird() {
     };
 
     const drawBird = () => {
-      // Yellow bird in space suit
-      ctx.fillStyle = '#FFFF00';
-      ctx.beginPath();
-      ctx.arc(100, birdY, birdSize / 2, 0, Math.PI * 2);
-      ctx.fill();
-      // Simple space helmet
-      ctx.strokeStyle = 'white';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(100, birdY, birdSize / 2 + 5, 0, Math.PI * 2);
-      ctx.stroke();
+      ctx.save();
+      ctx.translate(birdX, gameStateRef.current.birdY);
+
+      // Add rotation based on velocity
+      const rotation = Math.min(Math.max(gameStateRef.current.birdVelocity * 0.05, -0.5), 0.5);
+      ctx.rotate(rotation);
+
+      // Draw bird emoji
+      ctx.font = `${birdSize}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🐥', 0, 0);
+
+      ctx.restore();
     };
 
     const createObstacle = () => {
       const height = Math.random() * (canvas.height - gapHeight - 100) + 50;
-      obstacles.push({
+      gameStateRef.current.obstacles.push({
         x: canvas.width,
         height,
         passed: false
@@ -75,7 +87,7 @@ export default function SpaceFlappyBird() {
     const drawObstacles = () => {
       // Purple tree obstacles
       ctx.fillStyle = '#8A2BE2'; // Purple color
-      obstacles.forEach(obstacle => {
+      gameStateRef.current.obstacles.forEach(obstacle => {
         // Bottom obstacle
         ctx.fillRect(obstacle.x, obstacle.height + gapHeight, obstacleWidth, canvas.height - obstacle.height - gapHeight);
         // Top obstacle
@@ -96,37 +108,50 @@ export default function SpaceFlappyBird() {
     const updateGame = () => {
       if (!gameStarted || gameOver) return;
       // Update bird position
-      birdVelocity += gravity;
-      birdY += birdVelocity;
+      gameStateRef.current.birdVelocity += gravity;
+      gameStateRef.current.birdY += gameStateRef.current.birdVelocity;
+
+      // Calculate hitbox for the bird (smaller than the emoji to make collision more forgiving)
+      const birdHitboxSize = birdSize * 0.6;
       // Check for collision with top/bottom
-      if (birdY <= birdSize / 2 || birdY >= canvas.height - birdSize / 2) {
+      if (gameStateRef.current.birdY - birdHitboxSize / 2 <= 0 || 
+          gameStateRef.current.birdY + birdHitboxSize / 2 >= canvas.height) {
         endGame();
         return;
       }
       // Create new obstacles
-      if (obstacles.length === 0 || obstacles[obstacles.length - 1].x < canvas.width - 200) {
+      if (gameStateRef.current.obstacles.length === 0 || 
+          gameStateRef.current.obstacles[gameStateRef.current.obstacles.length - 1].x < canvas.width - 200) {
         createObstacle();
       }
       // Update obstacles and check collisions
-      for (let i = 0; i < obstacles.length; i++) {
-        obstacles[i].x -= 2;
+      for (let i = 0; i < gameStateRef.current.obstacles.length; i++) {
+        gameStateRef.current.obstacles[i].x -= 2;
         // Remove off-screen obstacles
-        if (obstacles[i].x + obstacleWidth < 0) {
-          obstacles.splice(i, 1);
+        if (gameStateRef.current.obstacles[i].x + obstacleWidth < 0) {
+          gameStateRef.current.obstacles.splice(i, 1);
           i--;
           continue;
         }
         // Check for collision
-        if (obstacles[i].x < 100 + birdSize / 2 && obstacles[i].x + obstacleWidth > 100 - birdSize / 2) {
-          if (birdY - birdSize / 2 < obstacles[i].height || birdY + birdSize / 2 > obstacles[i].height + gapHeight) {
+        if (
+          gameStateRef.current.obstacles[i].x < birdX + birdHitboxSize / 2 && 
+          gameStateRef.current.obstacles[i].x + obstacleWidth > birdX - birdHitboxSize / 2
+        ) {
+          if (
+            gameStateRef.current.birdY - birdHitboxSize / 2 < gameStateRef.current.obstacles[i].height || 
+            gameStateRef.current.birdY + birdHitboxSize / 2 > gameStateRef.current.obstacles[i].height + gapHeight
+          ) {
             endGame();
             return;
           }
         }
         // Update score when obstacle is passed
-        if (!obstacles[i].passed && obstacles[i].x + obstacleWidth < 100) {
-          obstacles[i].passed = true;
-          setScore(prevScore => prevScore + 1);
+        if (!gameStateRef.current.obstacles[i].passed && 
+            gameStateRef.current.obstacles[i].x + obstacleWidth < birdX) {
+          gameStateRef.current.obstacles[i].passed = true;
+          gameStateRef.current.score += 1;
+          setScore(gameStateRef.current.score);
         }
       }
       // Draw everything
@@ -134,22 +159,16 @@ export default function SpaceFlappyBird() {
       drawObstacles();
       drawBird();
       // Continue animation
-      animationFrameId = requestAnimationFrame(updateGame);
+      gameStateRef.current.animationFrameId = requestAnimationFrame(updateGame);
     };
 
     const jump = () => {
-      if (gameOver) {
-        resetGame();
-        return;
-      }
-      if (!gameStarted) {
-        setGameStarted(true);
-      }
-      birdVelocity = jumpStrength;
+      if (gameOver || !gameStarted) return;
+      gameStateRef.current.birdVelocity = jumpStrength;
     };
     const endGame = () => {
       setGameOver(true);
-      cancelAnimationFrame(animationFrameId);
+      cancelAnimationFrame(gameStateRef.current.animationFrameId);
       // Draw "Game Over" text
       drawBackground();
       drawObstacles();
@@ -162,44 +181,57 @@ export default function SpaceFlappyBird() {
       ctx.font = '20px Arial';
       ctx.fillText(isMobile ? 'Tap to Restart' : 'Press Space to Restart', canvas.width / 2, canvas.height / 2 + 50);
     };
-    const resetGame = () => {
-      birdY = canvas.height / 2;
-      birdVelocity = 0;
-      obstacles.length = 0;
-      setScore(0);
-      setGameOver(false);
-      setGameStarted(true);
-      animationFrameId = requestAnimationFrame(updateGame);
-    };
     const keyDownHandler = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
+      if (e.code === 'Space' && gameStarted && !gameOver) {
         e.preventDefault();
         jump();
       }
     };
 
-    const touchStartHandler = (e: TouchEvent) => {
-      e.preventDefault(); // Prevent default behavior
-      jump();
-    };
-    // Start initial drawing
+    // Initial drawing
     drawBackground();
-    drawBird();
+
+    // Draw a preview bird
+    ctx.font = `${birdSize}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('🐥', birdX, gameStateRef.current.birdY);
     // Add event listeners
     window.addEventListener('keydown', keyDownHandler);
-    canvas.addEventListener('click', jump);
-    canvas.addEventListener('touchstart', touchStartHandler, { passive: false });
+    canvas.addEventListener('click', () => {
+      if (gameStarted && !gameOver) jump();
+    });
     // Start game loop if game is started
     if (gameStarted && !gameOver) {
-      animationFrameId = requestAnimationFrame(updateGame);
+      gameStateRef.current.animationFrameId = requestAnimationFrame(updateGame);
     }
     return () => {
       window.removeEventListener('keydown', keyDownHandler);
       canvas.removeEventListener('click', jump);
-      canvas.removeEventListener('touchstart', touchStartHandler);
-      cancelAnimationFrame(animationFrameId);
+      cancelAnimationFrame(gameStateRef.current.animationFrameId);
     };
-  }, [gameStarted, gameOver, score, isMobile]);
+  }, [gameStarted, gameOver, isMobile]);
+
+  // Reset the game state when starting/restarting
+  useEffect(() => {
+    if (gameStarted && !gameOver) {
+      gameStateRef.current.birdY = canvasRef.current?.height ? canvasRef.current.height / 2 : 250;
+      gameStateRef.current.birdVelocity = 0;
+      gameStateRef.current.obstacles = [];
+      gameStateRef.current.score = 0;
+      setScore(0);
+    }
+  }, [gameStarted, gameOver]);
+
+  const handleStartGame = () => {
+    setGameStarted(true);
+    setGameOver(false);
+  };
+
+  const handleRestartGame = () => {
+    setGameStarted(true);
+    setGameOver(false);
+  };
 
   return (
     <div className="flex flex-col items-center">
@@ -208,17 +240,47 @@ export default function SpaceFlappyBird() {
           ref={canvasRef} 
           width={800} 
           height={500}
-          className="border border-gray-400 rounded-lg shadow-lg max-w-full"
+          className="border border-gray-400 rounded-lg shadow-lg"
           style={{ touchAction: 'none' }} // Prevent scrolling on touch
         />
+
+        {/* Game UI overlay */}
         {!gameStarted && !gameOver && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 text-white">
             <h2 className="text-3xl font-bold mb-4">Space Flappy Bird</h2>
-            <p className="mb-6">{isMobile ? 'Tap to start' : 'Press Space or Click to start'}</p>
+            <p className="mb-6">Help the chick navigate through space!</p>
+            <Button 
+              onClick={handleStartGame}
+              className="px-8 py-4 bg-yellow-400 hover:bg-yellow-500 text-black font-bold text-lg"
+            >
+              Start Game
+            </Button>
+          </div>
+        )}
+
+        {gameOver && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 text-white">
+            <h2 className="text-3xl font-bold mb-2">Game Over!</h2>
+            <p className="text-2xl mb-6">Score: {score}</p>
+            <Button 
+              onClick={handleRestartGame}
+              className="px-8 py-4 bg-yellow-400 hover:bg-yellow-500 text-black font-bold text-lg"
+            >
+              Play Again
+            </Button>
           </div>
         )}
       </div>
-      <div className="mt-4 text-xl font-bold">Score: {score}</div>
+
+      {gameStarted && !gameOver && (
+        <div className="mt-4 text-xl font-bold">Score: {score}</div>
+      )}
+
+      {gameStarted && !gameOver && (
+        <div className="mt-4 text-sm text-gray-300">
+          {isMobile ? "Tap on the game to flap" : "Press SPACE or click to flap"}
+        </div>
+      )}
     </div>
   );
 }
