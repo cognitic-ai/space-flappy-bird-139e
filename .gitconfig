@@ -1,0 +1,9 @@
+[user]
+	name = SteerCode Bot
+	email = bot@steercode.com
+[init]
+	defaultBranch = main
+[core]
+	autocrlf = input
+[safe]
+	directory = /home/user
